@@ -1,0 +1,86 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+:root {
+  --bg: #FAFAF8;
+  --ink: #16161A;
+  --accent: #3D5A6C;
+  --border: #E4E2DC;
+  --font-display: 'Fraunces', serif;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================================
+   CARROSSEL SOFISTICADO (CUSTOM SWIPER)
+   ========================================================================== */
+
+@layer components {
+
+  /* Permite que as setas fiquem visíveis fora da área das fotos */
+  .custom-swiper-container {
+    overflow: hidden !important;
+    position: relative;
+    width: 100%;
+  }
+
+  /* Setas Customizadas - Botões Circulares Minimalistas */
+  .swiper-btn-prev,
+  .swiper-btn-next {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--border, #e5e7eb);
+    background: #ffffff;
+    color: var(--ink, #111);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .swiper-btn-prev:hover,
+  .swiper-btn-next:hover {
+    background: var(--ink, #111);
+    color: #ffffff;
+    border-color: var(--ink, #111);
+  }
+
+  /* Estado Desativado */
+  .swiper-btn-prev.swiper-button-disabled,
+  .swiper-btn-next.swiper-button-disabled {
+    opacity: 0.25;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* Página em Linha Discreta */
+  .custom-swiper-container .swiper-pagination {
+    position: relative !important;
+    bottom: 0 !important;
+    margin-top: 24px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .custom-swiper-container .swiper-pagination-bullet {
+    width: 24px;
+    height: 2px;
+    border-radius: 0;
+    background: #e0e0e0;
+    opacity: 1;
+    margin: 0 !important;
+    transition: all 0.3s ease;
+  }
+
+  .custom-swiper-container .swiper-pagination-bullet-active {
+    background: var(--ink, #111);
+    height: 2px;
+  }
+}
