@@ -1,17 +1,9 @@
 <?php
 
-use App\Models\User;
+use App\Http\Controllers\ProductController;
+use App\Http\Controllers\ShippingController;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Http\Request;
-use App\Http\Controllers\CheckoutController;
 
-// Rota para retornar o usuário ATUALMENTE logado
-Route::middleware('auth')->get('/me', function (Request $request) {
-    return $request->user();
-});
-
-Route::middleware('auth')->get('/users', function () {
-    return User::with('role')->get();
-});   
-
-Route::post('/checkout', [CheckoutController ::class, 'store']);
+Route::get('/produtos/data', [ProductController::class, 'homeData']);
+Route::post('/frete/calcular', [ShippingController::class, 'calculate'])
+    ->middleware('throttle:20,1');

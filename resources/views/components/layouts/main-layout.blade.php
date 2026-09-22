@@ -5,11 +5,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ $pageTitle }}</title>
-    <link rel="stylesheet" href="{{ asset('assets/bootstrap/bootstrap.min.css') }}">
     <link rel="stylesheet" href="{{ asset('assets/fontawesome/css/all.min.css') }}">
     <link rel="stylesheet" href="{{ asset('assets/css/main.css') }}">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <link rel="shortcut icon" href="{{ asset('assets/images/favicon.png') }}" type="image/png">
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    @vite(['resources/css/app.css'])
 
     <script>
         @auth
@@ -52,9 +54,10 @@
 
     @auth
         @viteReactRefresh
-        @vite(['resources/css/app.css', 'resources/js/sidebar.jsx']) 
+        @vite(['resources/js/sidebar.jsx'])
     @endauth
     @stack('scripts')
+    <x-whatsapp-support-button />
 </body>
 
 </html>

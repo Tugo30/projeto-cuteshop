@@ -27,7 +27,9 @@
             Entrar
         </button>
     </form>
-
+    <p style="text-align:center;margin-top:16px;font-size:13px;">
+        <a href="{{ route('forgot_password') }}" style="color:#666;">Esqueci a senha</a>
+    </p>
     <p style="text-align:center;margin-top:24px;font-size:13px;color:#666;">
         Ainda não tem conta? <a href="{{ route('register') }}" style="font-weight:600;">Cadastre-se</a>
     </p>

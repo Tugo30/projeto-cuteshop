@@ -18,7 +18,15 @@ class CartService
 
     public function load(): Cart
     {
-        return $this->current()->load('items.variant.product');
+        return $this->current()->load(['items.variant.product', 'coupon']);
+    }
+
+    private function forgetShipping(Cart $cart): void
+    {
+        $cart->update([
+            'shipping_cents'   => null,
+            'shipping_service' => null,
+        ]);
     }
 
     public function add(int $variantId, int $qty = 1): Cart
@@ -34,6 +42,7 @@ class CartService
         $item->quantity = $newQty;
         $item->save();
 
+        $this->forgetShipping($cart);
         return $this->load();
     }
 
@@ -82,27 +91,38 @@ class CartService
         if ($qty <= 0) {
             $item->delete();
         } else {
+            abort_if($qty > $item->variant->stock, 422, 'Estoque insuficiente.');
             $item->update(['quantity' => $qty]);
         }
 
-        // Recarrega as relações para recalcular os totais atualizados
         $cart = $cart->fresh(['items.variant.product', 'coupon']);
-
-        // Recalcula cupom e limpa frete se o carrinho mudar
         $this->recalculateCart($cart);
-
+        $this->forgetShipping($cart);
+        
         return $cart->fresh(['items.variant.product', 'coupon']);
     }
 
     public function remove(int $itemId): Cart
     {
         $this->current()->items()->where('id', $itemId)->delete();
-        return $this->load();
+        $cart = $this->load();
+        $this->recalculateCart($cart);
+        $this->forgetShipping($cart);
+
+        return $cart->fresh(['items.variant.product', 'coupon']);
     }
 
     public function clear(): void
     {
-        $this->current()->items()->delete();
+        $cart = $this->current();
+        $cart->items()->delete();
+        $cart->update([
+            'coupon_id'         =>  null,
+            'discount_cents'    =>  0,
+            'shipping_cents'    =>  null,
+            'shipping_service'  =>  null,
+            'shipping_cep'      =>  null,
+        ]);
     }
 
     // Chame no login para não perder o carrinho do visitante

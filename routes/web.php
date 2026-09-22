@@ -12,10 +12,12 @@ use App\Http\Controllers\CheckoutController;
 use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\Admin\OrderController as AdminOrderController;
+use App\Http\Controllers\Admin\CouponController as AdminCouponController;
 use App\Http\Controllers\SitemapController;
 use App\Http\Controllers\WebhookController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\WishlistController;
+use App\Http\Controllers\WhatsappClickController;
 
 /*
 |--------------------------------------------------------------------------
@@ -24,37 +26,44 @@ use App\Http\Controllers\WishlistController;
 */
 
 Route::get('/', [MainController::class, 'home'])->name('home');
-ROute::get('/api/categorias-produtos', [MainController::class, 'categoriesWithProducts'])->name('categories.products');
+Route::get('/api/categorias-produtos', [MainController::class, 'categoriesWithProducts'])->name('categories.products');
+Route::get('/api/categorias', [MainController::class, 'categories'])->name('categories.index');
 Route::get('/sitemap.xml', [SitemapController::class, 'index'])->name('sitemap');
 Route::get('/produtos/data', [ProductController::class, 'index'])->name('products.data');
 Route::get('/produtos/busca', [ProductController::class, 'search'])->name('products.search');
 Route::get('/produtos/{id}/data', [ProductController::class, 'showData'])->name('products.show.data');
 Route::get('/produtos/{id}', [ProductController::class, 'show'])->name('products.show');
-Route::get('/privacidade', fn () => view('legal.privacidade'))->name('legal.privacy');
-Route::get('/termos', fn () => view('legal.terms'))->name('legal.terms');
+Route::get('/privacidade', fn() => view('legal.privacidade'))->name('legal.privacy');
+Route::get('/termos', fn() => view('legal.terms'))->name('legal.terms');
 
 
 /* ---------- CARRINHO (público: visitante também compra) ---------- */
 Route::get('/carrinho', [CartController::class, 'page'])->name('cart.page');
 
-Route::prefix('api/cart')->group(function () {
-    Route::get('/', [CartController::class, 'index'])->name('cart.index');
-    Route::post('/', [CartController::class, 'store'])->name('cart.store');
-    Route::put('/{itemId}', [CartController::class, 'update'])->name('cart.update');
-    Route::delete('/{itemId}', [CartController::class, 'destroy'])->name('cart.destroy');
-    Route::post('/frete', [CartController::class, 'calculateShipping'])->name('cart.shipping');
-    Route::post('/cupom', [CartController::class, 'applyCoupon'])->name('cart.coupon.apply');
-    Route::delete('/cupom', [CartController::class, 'removeCoupon'])->name('cart.coupon.remove');
+Route::prefix('api/cart')->middleware('throttle:40,1')->group(function () {
+    Route::get('/', [CartController::class, 'index']);
+    Route::post('/', [CartController::class, 'store']);
+
+    Route::post('/frete', [CartController::class, 'calculateShipping'])->middleware('throttle:15,1');
+    Route::post('/frete/selecionar', [CartController::class, 'selectShipping']);
+    Route::post('/cupom', [CartController::class, 'applyCoupon'])->middleware('throttle:30,1');
+    Route::delete('/cupom', [CartController::class, 'removeCoupon']);
+
+    Route::put('/{itemId}', [CartController::class, 'update'])->whereNumber('itemId');
+    Route::delete('/{itemId}', [CartController::class, 'destroy'])->whereNumber('itemId');
 });
 
 /* ---------- CHECKOUT ---------- */
-Route::get('/checkout', [CheckoutController::class, 'page'])->name('checkout.page');
-Route::get('/checkout/pix/{code}', [CheckoutController::class, 'pixPage'])->middleware('throttle:30,1')->name('checkout.pix');
-Route::get('/api/checkout/{code}/pix', [CheckoutController::class, 'pixData'])->middleware('throttle:30,1')->name('checkout.pix.data');
-Route::get('/api/checkout/{code}/status', [CheckoutController::class, 'status'])->middleware('throttle:60,1')->name('checkout.status');
+Route::get('/checkout', [CheckoutController::class, 'page'])->middleware(['auth', 'throttle:30,1'])->name('checkout.page');
 
-/* ---------- WEBHOOK (público — Mercado Pago chama de fora) ---------- */
-Route::post('/webhooks/mercadopago', [WebhookController::class, 'mercadoPago'])->name('webhooks.mercadopago');
+
+/* ---------- WEBHOOK (público — Getnet) ---------- */
+// Route::post('/webhooks/mercadopago', [WebhookController::class, 'mercadoPago'])
+//     ->middleware('throttle:300,1')
+//     ->name('webhooks.mercadopago');
+Route::post('/webhooks/getnet', [WebhookController::class, 'getnet'])
+    ->middleware('throttle:300,1')
+    ->name('webhooks.getnet');
 
 /*
 |--------------------------------------------------------------------------
@@ -66,15 +75,15 @@ Route::middleware('guest')->group(function () {
     Route::post('/login', [AuthController::class, 'authenticate'])->middleware('throttle:login')->name('authenticate');
 
     Route::get('/register', [AuthController::class, 'register'])->name('register');
-    Route::post('/register', [AuthController::class, 'store_user'])->name('store_user');
+    Route::post('/register', [AuthController::class, 'store_user'])->middleware('throttle:register')->name('store_user');
 
     Route::get('/new_user_confirmation/{token}', [AuthController::class, 'new_user_confirmation'])->name('new_user_confirmation');
 
     Route::get('/forgot_password', [AuthController::class, 'forgot_password'])->name('forgot_password');
-    Route::post('/forgot_password', [AuthController::class, 'send_reset_password_link'])->name('send_reset_password_link');
+    Route::post('/forgot_password', [AuthController::class, 'send_reset_password_link'])->middleware('throttle:password')->name('send_reset_password_link');
 
-    Route::get('/reset_password/{token}', [AuthController::class, 'reset_password'])->name('reset_password');
-    Route::post('/reset_password', [AuthController::class, 'reset_password_update'])->name('reset_password_update');
+    Route::get('/reset_password/{token}', [AuthController::class, 'reset_password'])->middleware('throttle:30,1')->name('reset_password');
+    Route::post('/reset_password', [AuthController::class, 'reset_password_update'])->middleware('throttle:password')->name('reset_password_update');
 });
 
 /*
@@ -88,11 +97,16 @@ Route::middleware('auth')->group(function () {
     Route::post('/profile/password', [AuthController::class, 'changePasswordApi'])->name('profile.password');
     Route::delete('/profile/account', [AuthController::class, 'deleteAccountApi'])->name('profile.account');
 
-    Route::get('/logout', [AuthController::class, 'logout'])->name('logout');
+    Route::get('/meus-pedidos', [OrderController::class, 'page'])->name('orders.page');
 
-    Route::post('/produtos/{id}/avaliacoes', [ReviewController::class, 'store'])->name('reviews.store');
+    Route::get('/logout', fn() => redirect()->route('home'));
+    Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 
-    Route::post('/api/checkout', [CheckoutController::class, 'store'])->name('checkout.store');
+    Route::post('/produtos/{id}/avaliacoes', [ReviewController::class, 'store'])
+        ->middleware('throttle:10,1')
+        ->name('reviews.store');
+
+    Route::post('/api/checkout', [CheckoutController::class, 'store'])->middleware('throttle:10,1')->name('checkout.store');
 
     /*
     |----------------------------------------------------------------------
@@ -107,6 +121,19 @@ Route::middleware('auth')->group(function () {
     /* ---------- PEDIDOS DO CLIENTE ---------- */
     Route::get('/api/meus-pedidos', [OrderController::class, 'myOrders'])->name('orders.mine');
     Route::post('/api/meus-pedidos/{code}/cancelar', [OrderController::class, 'cancel'])->name('orders.cancel');
+    Route::get('/api/meus-pedidos/{code}', [OrderController::class, 'detail'])->name('orders.detail');
+
+    /* ---------- Pagamentos ---------- */
+    Route::get('/checkout/pix/{code}', [CheckoutController::class, 'pixPage'])->middleware('throttle:30,1')->name('checkout.pix');
+    Route::get('/checkout/pagamento/{code}', [CheckoutController::class, 'pixPage'])->middleware('throttle:30,1')->name('checkout.pay');
+    Route::get('/api/checkout/{code}/pagamento', [CheckoutController::class, 'paymentData'])->middleware('throttle:30,1')->where('code', 'CS-[A-Za-z0-9-]+')->name('checkout.payment.data');
+    Route::get('/api/checkout/{code}/status', [CheckoutController::class, 'status'])->middleware('throttle:60,1')->where('code', 'CS-[A-Za-z0-9-]+')->name('checkout.status');
+    Route::post('/api/checkout/{code}/cartao', [CheckoutController::class, 'payCard'])->middleware('throttle:10,1')->name('checkout.pay.card');
+
+    /* ---------- SUPORTE ---------- */
+    Route::post('/api/suporte/whatsapp-click', [WhatsappClickController::class, 'store'])
+        ->middleware('throttle:30,1')
+        ->name('whatsapp.click');
 
     /*
     |----------------------------------------------------------------------
@@ -135,6 +162,15 @@ Route::middleware('auth')->group(function () {
         Route::put('/pedidos/{code}/status', [AdminOrderController::class, 'updateStatus']);
         Route::put('/pedidos/{code}/rastreio', [AdminOrderController::class, 'updateTracking']);
 
+        // CUPOM
+        Route::get('/cupons', [AdminCouponController::class, 'index']);
+
+        Route::get('/cupons/usuarios', [AdminCouponController::class, 'searchUsers']);
+        Route::get('/cupons/{coupon}', [AdminCouponController::class, 'show']);
+        Route::post('/cupons', [AdminCouponController::class, 'store']);
+        Route::put('/cupons/{coupon}', [AdminCouponController::class, 'update']);
+        Route::delete('/cupons/{coupon}', [AdminCouponController::class, 'destroy']);
+
         // DASHBOARD - MÉTRICAS
         Route::get('/metricas', [DashboardController::class, 'metrics']);
     });
@@ -159,6 +195,8 @@ Route::middleware('auth')->group(function () {
         })->name('categories.index');
 
         Route::get('/pedidos', [AdminOrderController::class, 'page'])->name('orders.index');
+
+        Route::get('/cupons', [AdminCouponController::class, 'page'])->name('coupons.index');
     });
 });
 

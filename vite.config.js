@@ -1,13 +1,22 @@
 import { defineConfig } from 'vite'
+import tailwindcss from '@tailwindcss/vite'
 import laravel from 'laravel-vite-plugin'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
 export default defineConfig({
     server: {
-        host: '127.0.0.1', // ← adicione isso
+        host: '127.0.0.1',
+        allowedHosts: ['.monkeycode-ai.live'],
+        proxy: {
+            '/api': {
+                target: 'http://localhost:8000',
+                changeOrigin: true,
+            },
+        },
     },
     plugins: [
+        tailwindcss(),
         laravel({
             input: [
                 'resources/css/app.css',
@@ -19,9 +28,12 @@ export default defineConfig({
                 'resources/js/checkout.jsx',
                 'resources/js/checkout-pix.jsx',
                 'resources/js/cart-page.jsx',
-                // ADMIN
-                'resources/js/admin-products.jsx',
+                'resources/js/my-orders.jsx',
+                'resources/js/profile.jsx',
+                'resources/js/admin-coupons.jsx',
+                'resources/js/admin-orders.jsx',
                 'resources/js/admin-categories.jsx',
+                'resources/js/admin-dashboard.jsx',
             ],
             refresh: true,
         }),

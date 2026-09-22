@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Role;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticable;
 use Illuminate\Notifications\Notifiable;
 
@@ -11,7 +12,7 @@ class User extends Authenticable
 {
     use SoftDeletes;
 
-    use Notifiable;
+    use HasFactory, Notifiable;
 
     protected $fillable = [
         'role_id',
@@ -24,7 +25,9 @@ class User extends Authenticable
 
     protected $hidden = [
         'password',
-        'token'
+        'token',
+        'remember_token',
+        'blocked_until'
     ];
 
     protected $casts = [
@@ -33,16 +36,40 @@ class User extends Authenticable
         'blocked_until' => 'datetime',
         'terms_accepted_at' => 'datetime',
         'active' => 'boolean'
-    ];  
+    ];
 
-    public function role()
+    protected $appends = [
+        'is_admin',
+        'is_staff'
+    ];
+    public function orders()
     {
-        return $this->belongsTo(Role::class);
+        return $this->hasMany(\App\Models\Order::class);
+    }
+
+    public function assignedRole()
+    {
+        return $this->belongsTo(Role::class, 'role_id');
     }
 
     public function isAdmin()
     {
-        return $this->role?->nome === 'admin';
+        return $this->assignedRole?->nome === 'admin';
+    }
+
+    public function isStaff(): bool
+    {
+        return in_array($this->assignedRole?->nome, ['admin', 'gerente', 'estoquista', 'atendente'], true);
+    }
+
+    public function getIsAdminAttribute(): bool
+    {
+        return $this->isAdmin();
+    }
+
+    public function getIsStaffAttribute(): bool
+    {
+        return $this->isStaff();
     }
 
     public function wishlist()

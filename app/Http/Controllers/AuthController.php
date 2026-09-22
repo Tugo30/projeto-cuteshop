@@ -92,10 +92,12 @@ class AuthController extends Controller
         return redirect()->intended(route('home'));
     }
 
-    public function logout(): RedirectResponse
+    public function logout(Request $request): RedirectResponse
     {
-        // logout
         Auth::logout();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
         return redirect()->route('login');
     }
 
@@ -112,7 +114,7 @@ class AuthController extends Controller
                 'email' => 'required|email|unique:users,email',
                 'password' => 'required|min:8|max:32|regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$/',
                 'password_confirmation' => 'required|same:password',
-                'accpet_terms' => 'required|accepted',
+                'accept_terms' => 'required|accepted',
             ],
             [
                 'username.required' => 'Preencha este campo!',
@@ -134,12 +136,13 @@ class AuthController extends Controller
 
         $user = new User();
         $user->username = $request->username;
+        $user->name = $request->username;
         $user->email = $request->email;
         $user->password = bcrypt($request->password);
         $user->role_id = 2;
         $user->active = true;
         $user->email_verified_at = now();
-        $user->terms_accept_at = now();
+        $user->terms_accepted_at = now();
         $user->save();
 
         Auth::login($user);
@@ -333,6 +336,7 @@ class AuthController extends Controller
 
         // atualizar a senha na base de dados
         $user->password = bcrypt($request->new_password);
+        $user->token = null;
         $user->save();
 
         return redirect()->route('login')->with([

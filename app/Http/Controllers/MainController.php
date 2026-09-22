@@ -45,4 +45,13 @@ class MainController extends Controller
 
         return response()->json($categories);
     }
+
+    public function categories()
+    {
+        return response()->json(
+            Category::whereHas('products', fn($q) => $q->where('active', true))
+                ->orderBy('name')
+                ->get(['id', 'name'])
+        );
+    }
 }

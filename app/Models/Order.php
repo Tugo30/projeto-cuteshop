@@ -12,6 +12,7 @@ class Order extends Model
         'user_id',
         'status',
         'coupon_id',
+        'shipping_service',
         'subtotal_cents',
         'shipping_cents',
         'discount_cents',
@@ -31,12 +32,15 @@ class Order extends Model
         'expires_at',
         'tracking_code',
         'shipped_at',
+        'delivered_at',
+        'payment_method'
     ];
 
     protected $casts = [
         'paid_at' => 'datetime',
         'expires_at' => 'datetime',
         'shipped_at' => 'datetime',
+        'delivered_at' => 'datetime',
     ];
 
     protected $appends = ['total'];
@@ -49,6 +53,16 @@ class Order extends Model
     public function payments()
     {
         return $this->hasMany(Payment::class);
+    }
+
+    public function statusEvents()
+    {
+        return $this->hasMany(OrderStatusEvent::class);
+    }
+
+    public function latestStatusEvent()
+    {
+        return $this->hasOne(OrderStatusEvent::class)->latestOfMany('occurred_at');
     }
 
     public function user()
@@ -71,5 +85,10 @@ class Order extends Model
     public static function generateCode(): string
     {
         return 'CS-' . now()->format('YmdHis') . '-' . strtoupper(Str::random(12));
-    }   
+    }
+
+    public function getTotalAttribute(): float
+    {
+        return $this->total_cents / 100;
+    }
 }

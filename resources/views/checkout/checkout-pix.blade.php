@@ -1,10 +1,8 @@
-<x-layouts.main-layout pageTitle="Pagamento Pix">
-    <div style="padding: 20px; width: 100%; min-height: 100vh;">
-        <div id="checkout-pix-app" data-order-code="{{ $orderCode }}"></div>
-    </div>
+<x-layouts.loja-layout pageTitle="Pagamento">
+    <div id="checkout-payment-app" data-order-code="{{ $orderCode }}" style="width: 100%; min-height: 60vh;"></div>
 
     @push('scripts')
         @viteReactRefresh
-        @vite(['resources/css/app.css', 'resources/js/checkout-pix.jsx'])
+        @vite(['resources/css/app.css', 'resources/js/checkout-payment.jsx'])
     @endpush
-</x-layouts.main-layout>
+</x-layouts.loja-layout>

@@ -7,7 +7,12 @@ use Illuminate\Support\Facades\Storage;
 
 class ProductImage extends Model
 {
-    protected $fillable = ['product_id', 'path', 'sort_order'];
+    protected $fillable = ['product_id', 'path', 'sort_order', 'is_cover'];
+
+    protected $casts = [
+        'is_cover' => 'boolean',
+    ];
+
     protected $appends = ['url'];
 
     public function getUrlAttribute(): string

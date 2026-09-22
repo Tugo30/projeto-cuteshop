@@ -15,7 +15,11 @@ class ProductVariant extends Model
         'stock',
         'cost_price',
         'price',
-        'barcode'
+        'barcode',
+        'weight_kg',
+        'height_cm',
+        'width_cm',
+        'length_cm',
     ];
 
     protected $casts = [
@@ -37,5 +41,10 @@ class ProductVariant extends Model
     public function getPriceCentsAttribute(): int
     {
         return (int) round($this->price * 100);
+    }
+
+    public function movements()
+    {
+        return $this->hasMany(StockMovement::class, 'product_variant_id')->latest();
     }
 }

@@ -1,86 +1,120 @@
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap");
+@import "tailwindcss";
 
-:root {
-  --bg: #FAFAF8;
-  --ink: #16161A;
-  --accent: #3D5A6C;
-  --border: #E4E2DC;
-  --font-display: 'Fraunces', serif;
-  --font-body: 'Inter', sans-serif;
-  --font-mono: 'IBM Plex Mono', monospace;
+@theme {
+    --color-surface: #FAFAF8;
+    --color-ink: #16161A;
+    --color-border: #E4E2DC;
+
+    --color-background: #FAFAF8;
+    --color-foreground: #16161A;
+    --color-card: #ffffff;
+    --color-card-foreground: #16161A;
+    --color-popover: #ffffff;
+    --color-popover-foreground: #16161A;
+    --color-primary: #3D5A6C;
+    --color-primary-foreground: #ffffff;
+    --color-secondary: #F1EFE9;
+    --color-secondary-foreground: #16161A;
+    --color-muted: #F1EFE9;
+    --color-muted-foreground: #737373;
+    --color-accent: #EDF1F3;
+    --color-accent-foreground: #16161A;
+    --color-destructive: #b91c1c;
+    --color-destructive-foreground: #ffffff;
+    --color-input: #E4E2DC;
+    --color-ring: #3D5A6C;
+
+    --font-display: "Fraunces", serif;
+    --font-sans: "Inter", sans-serif;
+    --font-mono: "IBM Plex Mono", monospace;
+
+    --radius-md: 0.5rem;
+    --radius-lg: 0.625rem;
 }
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+:root {
+    --bg: #FAFAF8;
+    --ink: #16161A;
+    --accent: #3D5A6C;
+    --border: #E4E2DC;
+}
 
-/* ==========================================================================
-   CARROSSEL SOFISTICADO (CUSTOM SWIPER)
-   ========================================================================== */
+@layer base {
+    *,
+    ::before,
+    ::after {
+        border-color: var(--color-border);
+    }
+
+    html,
+    body {
+        margin: 0;
+        padding: 0;
+        background-color: #FAF9F5;
+        font-family: var(--font-sans);
+        color: var(--color-ink);
+    }
+}
 
 @layer components {
+    .custom-swiper-container {
+        overflow: hidden !important;
+        position: relative;
+        width: 100%;
+    }
 
-  /* Permite que as setas fiquem visíveis fora da área das fotos */
-  .custom-swiper-container {
-    overflow: hidden !important;
-    position: relative;
-    width: 100%;
-  }
+    .swiper-btn-prev,
+    .swiper-btn-next {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border: 1px solid var(--border, #e5e7eb);
+        background: #ffffff;
+        color: var(--ink, #111);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
 
-  /* Setas Customizadas - Botões Circulares Minimalistas */
-  .swiper-btn-prev,
-  .swiper-btn-next {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    border: 1px solid var(--border, #e5e7eb);
-    background: #ffffff;
-    color: var(--ink, #111);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  }
+    .swiper-btn-prev:hover,
+    .swiper-btn-next:hover {
+        background: var(--ink, #111);
+        color: #ffffff;
+        border-color: var(--ink, #111);
+    }
 
-  .swiper-btn-prev:hover,
-  .swiper-btn-next:hover {
-    background: var(--ink, #111);
-    color: #ffffff;
-    border-color: var(--ink, #111);
-  }
+    .swiper-btn-prev.swiper-button-disabled,
+    .swiper-btn-next.swiper-button-disabled {
+        opacity: 0.25;
+        cursor: not-allowed;
+        pointer-events: none;
+    }
 
-  /* Estado Desativado */
-  .swiper-btn-prev.swiper-button-disabled,
-  .swiper-btn-next.swiper-button-disabled {
-    opacity: 0.25;
-    cursor: not-allowed;
-    pointer-events: none;
-  }
+    .custom-swiper-container .swiper-pagination {
+        position: relative !important;
+        bottom: 0 !important;
+        margin-top: 24px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 6px;
+    }
 
-  /* Página em Linha Discreta */
-  .custom-swiper-container .swiper-pagination {
-    position: relative !important;
-    bottom: 0 !important;
-    margin-top: 24px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 6px;
-  }
+    .custom-swiper-container .swiper-pagination-bullet {
+        width: 24px;
+        height: 2px;
+        border-radius: 0;
+        background: #e0e0e0;
+        opacity: 1;
+        margin: 0 !important;
+        transition: all 0.3s ease;
+    }
 
-  .custom-swiper-container .swiper-pagination-bullet {
-    width: 24px;
-    height: 2px;
-    border-radius: 0;
-    background: #e0e0e0;
-    opacity: 1;
-    margin: 0 !important;
-    transition: all 0.3s ease;
-  }
-
-  .custom-swiper-container .swiper-pagination-bullet-active {
-    background: var(--ink, #111);
-    height: 2px;
-  }
+    .custom-swiper-container .swiper-pagination-bullet-active {
+        background: var(--ink, #111);
+        height: 2px;
+    }
 }

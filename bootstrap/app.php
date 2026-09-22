@@ -17,9 +17,10 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->validateCsrfTokens(except: [
-            'webhooks/mercadopago',
+             'webhooks/*',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //
     })->create();
+    

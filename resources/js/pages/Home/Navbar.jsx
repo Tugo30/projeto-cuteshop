@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react"
 import axios from "axios"
-
-const NAV_LINKS = ["Camisetas", "Calças", "Acessórios", "Novidades"]
+import { Toaster } from "sonner"
 
 export default function Navbar() {
     const [scrolled, setScrolled] = useState(false)
@@ -9,7 +8,7 @@ export default function Navbar() {
     const [menuOpen, setMenuOpen] = useState(false)
     const [user, setUser] = useState(null)
     const [cartCount, setCartCount] = useState(0)
-    const [wishlistCount, setWishlistCount] = useState(0) // NOVO
+    const [wishlistCount, setWishlistCount] = useState(0)
 
     const [searchOpen, setSearchOpen] = useState(false)
     const [searchTerm, setSearchTerm] = useState("")
@@ -37,7 +36,6 @@ export default function Navbar() {
         return () => window.removeEventListener('cart:updated', onUpdate)
     }, [])
 
-    // NOVO — mesmo padrão do carrinho, só trocando a origem dos dados
     useEffect(() => {
         const ler = (data) => setWishlistCount(Number(data?.count ?? 0))
         axios.get('/wishlist').then(res => ler(res.data)).catch(() => { })
@@ -63,6 +61,7 @@ export default function Navbar() {
 
     return (
         <>
+            <Toaster position="top-center" richColors />
             <div className="w-full bg-ink text-white text-center py-2 px-4 font-mono text-[11px] sm:text-xs tracking-wide">
                 Frete grátis acima de R$ 299 · Pagamento 100% seguro
             </div>
@@ -74,14 +73,6 @@ export default function Navbar() {
                         zLuz
                     </a>
 
-                    <div className="hidden md:flex gap-8 font-body text-sm text-ink">
-                        {NAV_LINKS.map(link => (
-                            <a key={link} href="/#produtos" className="opacity-75 hover:opacity-100 transition-opacity">
-                                {link}
-                            </a>
-                        ))}
-                    </div>
-
                     <div className="flex items-center gap-3 sm:gap-5">
                         <button aria-label="Buscar" className="text-ink p-1" onClick={() => setSearchOpen(true)}>
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -90,13 +81,12 @@ export default function Navbar() {
                             </svg>
                         </button>
 
-                        {/* NOVO — ícone de favoritos, entre a busca e a conta */}
                         <a href="/favoritos" aria-label="Favoritos" className="relative text-ink p-1">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
                                 <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8Z" />
                             </svg>
                             {wishlistCount > 0 && (
-                                <span className="absolute -top-1 -right-1 bg-accent text-white font-mono text-[10px] w-4 h-4 rounded-full flex items-center justify-center">
+                                <span className="absolute -top-1 -right-1 bg-primary text-white font-mono text-[10px] w-4 h-4 rounded-full flex items-center justify-center">
                                     {wishlistCount}
                                 </span>
                             )}
@@ -116,13 +106,23 @@ export default function Navbar() {
                                             Olá, {user.username}
                                         </div>
                                         <a href="/profile" className="block px-4 py-2.5 text-sm text-ink">Meu Perfil</a>
-                                        <a href="/logout" className="block px-4 py-2.5 text-sm text-red-700">Sair da conta</a>
+                                        <a href="/meus-pedidos" className="block px-4 py-2.5 text-sm text-ink">Meus pedidos</a>
+                                        <form method="POST" action="/logout">
+                                            <input type="hidden" name="_token" value={document.querySelector('meta[name="csrf-token"]')?.content} />
+                                            <button type="submit" className="block w-full text-left px-4 py-2.5 text-sm text-red-700 bg-transparent border-0 cursor-pointer">Sair da conta</button>
+                                        </form>
                                     </div>
                                 )}
                             </div>
                         ) : (
                             <a href="/login" className="text-ink text-[13px] font-semibold hidden sm:inline">
                                 Entrar / Registrar-se
+                            </a>
+                        )}
+
+                        {(user?.role_id === 1) && (
+                            <a href="/admin/dashboard" className="hidden sm:inline font-mono text-[11px] uppercase tracking-[0.14em] border border-border px-3 py-1.5 text-ink">
+                                Painel
                             </a>
                         )}
 
@@ -133,7 +133,7 @@ export default function Navbar() {
                                 <path d="M16 10a4 4 0 0 1-8 0" />
                             </svg>
                             {cartCount > 0 && (
-                                <span className="absolute -top-1 -right-1 bg-accent text-white font-mono text-[10px] w-4 h-4 rounded-full flex items-center justify-center">
+                                <span className="absolute -top-1 -right-1 bg-primary text-white font-mono text-[10px] w-4 h-4 rounded-full flex items-center justify-center">
                                     {cartCount}
                                 </span>
                             )}
@@ -151,11 +151,8 @@ export default function Navbar() {
 
                 {navOpen && (
                     <div className="md:hidden border-t border-border bg-surface px-4 py-4 flex flex-col gap-3 font-body text-sm text-ink">
-                        {NAV_LINKS.map(link => (
-                            <a key={link} href="/#produtos" onClick={() => setNavOpen(false)}>{link}</a>
-                        ))}
                         <a href="/favoritos" onClick={() => setNavOpen(false)}>Favoritos {wishlistCount > 0 && `(${wishlistCount})`}</a>
-                        {!user && <a href="/login" className="font-semibold">Entrar / Registrar-se</a>}
+                        {!user && <a href="/login" className="font-semibold" onClick={() => setNavOpen(false)}>Entrar / Registrar-se</a>}
                     </div>
                 )}
             </header>

@@ -30,7 +30,10 @@ class Review extends Model
         return $this->belongsTo(Product::class);
     }
 
-
+    public function photos()
+    {
+        return $this->hasMany(ReviewPhoto::class)->orderBy('sort_order');
+    }
 
 
 }

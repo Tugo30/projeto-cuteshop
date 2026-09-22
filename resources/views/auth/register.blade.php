@@ -31,7 +31,7 @@
 
         <div>
             <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px; color: #555;"> 
-                <input type="checkbox" name="accept_terms" value="1" required style="margin-top:2px;" />    
+                <input type="checkbox" name="accept_terms" value="1" style="margin-top:2px;" />    
                 <span>
                     Li e concordo com a
                     <a href="{{ route('legal.privacy') }}" target="_blank" style="font-wight: 600;">Políticas de privacidade </a>
@@ -39,7 +39,9 @@
                     <a href="{{ route('legal.terms') }}" target="_blank" style="font-weight:600;">Termos de Uso</a>.
                 </span>
             </label>    
-            @erro('accept_terms')<small style="color: #b91c1c; display: block; margin-top: 4px">{{ $message }}</small>
+            @error('accept_terms')
+                <small style="color:#b91c1c; display:block; margin-top:4px;">{{ $message }}</small>
+            @enderror
         </div>        
 
         <button type="submit" style="background:#000;color:#fff;padding:12px;border:none;border-radius:2px;font-weight:600;cursor:pointer;">

@@ -2,17 +2,22 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\Cart\ApplyCouponRequest;
+use App\Http\Requests\Cart\CalculateShippingRequest;
+use App\Http\Requests\Cart\SelectShippingRequest;
+use App\Http\Requests\Cart\StoreCartItemRequest;
+use App\Http\Requests\Cart\UpdateCartItemRequest;
 use App\Models\Coupon;
+use App\Models\ProductVariant;
 use App\Services\CartService;
-use App\Services\SuperFreteService;
-use Illuminate\Http\Request;
+use App\Services\ShippingQuoteService;
 use Illuminate\Support\Facades\Log;
 
 class CartController extends Controller
 {
     public function __construct(
         private CartService $cart,
-        private SuperFreteService $superFrete,
+        private ShippingQuoteService $shipping
     ) {}
 
     public function index()
@@ -20,21 +25,25 @@ class CartController extends Controller
         return response()->json($this->present($this->cart->load()));
     }
 
-    public function store(Request $request)
+    public function store(StoreCartItemRequest $request)
     {
-        $data = $request->validate([
-            'product_variant_id' => 'required|exists:product_variants,id',
-            'quantity'           => 'nullable|integer|min:1|max:99',
-        ]);
+        $data = $request->validated();
 
-        $cart = $this->cart->add($data['product_variant_id'], $data['quantity'] ?? 1);
+        $qty = $data['quantity'] ?? 1;
+        $variant = ProductVariant::query()->find($data['product_variant_id']);
 
-        return response()->json($this->present($cart));
+        if (! $variant || $variant->stock < $qty) {
+            return response()->json(['message' => 'Estoque insuficiente.'], 422);
+        }
+
+        return response()->json($this->present(
+            $this->cart->add($data['product_variant_id'], $qty)
+        ));
     }
 
-    public function update(Request $request, int $itemId)
+    public function update(UpdateCartItemRequest $request, int $itemId)
     {
-        $data = $request->validate(['quantity' => 'required|integer|min:0|max:99']);
+        $data = $request->validated();
 
         return response()->json($this->present($this->cart->updateQty($itemId, $data['quantity'])));
     }
@@ -49,15 +58,9 @@ class CartController extends Controller
         return view('cart.cart');
     }
 
-    public function calculateShipping(Request $request)
+    public function calculateShipping(CalculateShippingRequest $request)
     {
-        $data = $request->validate([
-            'cep' => 'required|string|min:8|max:9'
-        ]);
-
-        // Sanitiza o CEP (deixa apenas números)
-        $cleanCep = preg_replace('/\D/', '', $data['cep']);
-
+        $cleanCep = $request->validated()['cep'];
         $cart = $this->cart->load();
 
         if ($cart->items->isEmpty()) {
@@ -65,57 +68,113 @@ class CartController extends Controller
         }
 
         try {
-            $result = $this->superFrete->cheapestForCart($cart, $cleanCep);
-            Log::info('Resultado SuperFrete:', (array) $result);
-        } catch (\Exception $e) {
-            Log::error('Erro ao calcular frete: ' . $e->getMessage());
-            return response()->json(['message' => 'Não foi possível calcular o frete: ' . $e->getMessage()], 422);
-        }
+            $rawOptions = $this->shipping->calculateForCart($cart, $cleanCep);
 
-        // Extrai o valor do frete sem permitir que caia silenciosamente para 0
-        $cents = 0;
-        if (isset($result['cents']) && $result['cents'] > 0) {
-            $cents = (int) $result['cents'];
-        } elseif (isset($result['price']) && (float)$result['price'] > 0) {
-            $cents = (int) round(((float) $result['price']) * 100);
-        } elseif (is_numeric($result) && (float)$result > 0) {
-            $cents = (int) round(((float) $result) * 100);
-        }
+            $options = collect($rawOptions)
+                ->reject(fn ($opt) => ! empty($opt['error']) || ($opt['has_error'] ?? false))
+                ->map(function ($opt) {
+                    $price = (float) ($opt['price'] ?? 0);
 
-        // Se o cálculo não retornar valor válido maior que zero, interrompe com erro
-        if ($cents <= 0) {
+                    return [
+                        'id'            => $opt['id'] ?? null,
+                        'name'          => $opt['name'] ?? 'Frete',
+                        'price'         => $price,
+                        'price_cents'   => (int) round($price * 100),
+                        'delivery_time' => $opt['delivery_time'] ?? null,
+                        'company_logo'  => $opt['company']['picture'] ?? null,
+                    ];
+                })
+                ->filter(fn ($opt) => $opt['id'] !== null && $opt['price_cents'] >= 0)
+                ->values();
+
+            if ($options->isEmpty()) {
+                return response()->json([
+                    'message' => 'Nenhum serviço de entrega disponível para este CEP.',
+                ], 422);
+            }
+
             return response()->json([
-                'message' => 'Não foi possível obter um valor de frete válido para este CEP.'
-            ], 422);
+                'cep'     => $cleanCep,
+                'options' => $options,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Erro ao calcular frete', ['exception' => $e->getMessage()]);
+
+            return response()->json(['message' => 'Não foi possível calcular o frete.'], 422);
         }
-
-        // Salva o CEP sanitizado e as informações do frete no carrinho
-        $cart->update([
-            'shipping_cep'     => $cleanCep,
-            'shipping_cents'   => $cents,
-            'shipping_service' => $result['service'] ?? $result['name'] ?? 'SuperFrete',
-        ]);
-
-        return response()->json($this->present($cart->fresh()->load('items.variant.product')));
     }
 
-    public function applyCoupon(Request $request)
+    public function selectShipping(SelectShippingRequest $request)
     {
-        $data = $request->validate(['codigo' => 'required|string|max:50']);
+        $data = $request->validated();
+        $cleanCep = $data['cep'];
         $cart = $this->cart->load();
 
         if ($cart->items->isEmpty()) {
             return response()->json(['message' => 'Carrinho vazio.'], 422);
         }
 
-        $coupon = Coupon::where('codigo', $data['codigo'])
+        try {
+            $rawOptions = $this->shipping->calculateForCart($cart, $cleanCep);
+        } catch (\Exception $e) {
+            Log::error('Erro ao validar frete', ['exception' => $e->getMessage()]);
+
+            return response()->json(['message' => 'Não foi possível validar o frete.'], 422);
+        }
+
+        $selected = collect($rawOptions)->first(function ($opt) use ($data) {
+            if (! empty($opt['error']) || ($opt['has_error'] ?? false)) {
+                return false;
+            }
+
+            $id = (string) ($opt['id'] ?? '');
+            $name = (string) ($opt['name'] ?? '');
+
+            return $id === $data['service'] || $name === $data['service'];
+        });
+
+        if (! $selected) {
+            return response()->json(['message' => 'Opção de frete inválida para este CEP.'], 422);
+        }
+
+        $price = (float) ($selected['price'] ?? 0);
+
+        $cart->update([
+            'shipping_cep'     => $cleanCep,
+            'shipping_cents'   => (int) round($price * 100),
+            'shipping_service' => $selected['name'] ?? $data['service'],
+        ]);
+
+        return response()->json($this->present(
+            $cart->fresh()->load(['items.variant.product', 'coupon'])
+        ));
+    }
+
+    public function applyCoupon(ApplyCouponRequest $request)
+    {
+        $data = $request->validated();
+
+        $cart = $this->cart->load();
+
+        if ($cart->items->isEmpty()) {
+            return response()->json(['message' => 'Carrinho vazio.'], 422);
+        }
+
+        $coupon = Coupon::query()
+            ->where('codigo', $data['codigo'])
             ->where('active', true)
             ->where(function ($q) {
                 $q->whereNull('validade')->orWhere('validade', '>=', now()->toDateString());
-            })->first();
+            })
+            ->first();
 
         if (! $coupon) {
             return response()->json(['message' => 'Cupom inválido ou expirado.'], 422);
+        }
+
+        $reason = $coupon->isUsableBy($request->user()?->id);
+        if ($reason) {
+            return response()->json(['message' => $reason], 422);
         }
 
         $subtotalCents = (int) round($this->getSubtotalInReais($cart) * 100);
@@ -131,7 +190,9 @@ class CartController extends Controller
             'discount_cents' => $discount,
         ]);
 
-        return response()->json($this->present($cart->fresh()->load('items.variant.product')));
+        return response()->json($this->present(
+            $cart->fresh()->load(['items.variant.product', 'coupon'])
+        ));
     }
 
     public function removeCoupon()
@@ -139,7 +200,9 @@ class CartController extends Controller
         $cart = $this->cart->load();
         $cart->update(['coupon_id' => null, 'discount_cents' => 0]);
 
-        return response()->json($this->present($cart->fresh()->load('items.variant.product')));
+        return response()->json($this->present(
+            $cart->fresh()->load(['items.variant.product', 'coupon'])
+        ));
     }
 
     private function getSubtotalInReais($cart): float
@@ -149,17 +212,30 @@ class CartController extends Controller
         });
     }
 
+    private function productImage($product): ?string
+    {
+        if (! $product) return null;
+        $path = $product->coverImage?->path ?? $product->image;
+        if (! $path) return $product->image_url ?? null;
+        if (str_starts_with($path, 'http') || str_starts_with($path, '/')) return $path;
+        return '/storage/' . $path;
+    }
+
     private function present($cart): array
     {
+        $cart->loadMissing(['items.variant.product.coverImage', 'coupon']);
+
         $items = $cart->items->map(function ($i) {
+            $product = $i->variant->product ?? null;
             $price = (float) ($i->variant->price ?? 0);
+
             return [
                 'id'                 => $i->id,
                 'variant_id'         => $i->product_variant_id ?? $i->variant_id,
                 'product_variant_id' => $i->product_variant_id ?? $i->variant_id,
-                'name'               => $i->variant->product->name ?? 'Produto',
+                'name'               => $product->name ?? 'Produto',
                 'size'               => $i->variant->size ?? null,
-                'image'              => $i->variant->product->image ?? $i->variant->product->cover_url ?? null,
+                'image'              => $this->productImage($product),
                 'unit_price'         => $price,
                 'quantity'           => (int) $i->quantity,
                 'stock'              => (int) ($i->variant->stock ?? 0),
@@ -170,27 +246,24 @@ class CartController extends Controller
         $subtotal = $items->sum('line_total');
         $subtotalCents = (int) round($subtotal * 100);
 
-        $shippingCents = (int) ($cart->shipping_cents ?? 0);
-        $shipping = $shippingCents / 100;
-
+        $hasShipping = $cart->shipping_cents !== null && filled($cart->shipping_service);
+        $shippingCents = $hasShipping ? (int) $cart->shipping_cents : null;
         $discountCents = (int) ($cart->discount_cents ?? 0);
-        $discount = $discountCents / 100;
-
-        $totalCents = max(0, $subtotalCents - $discountCents + $shippingCents);
-        $total = $totalCents / 100;
+        $totalCents = max(0, $subtotalCents - $discountCents + ($shippingCents ?? 0));
 
         return [
             'id'               => $cart->id,
+            'count'            => (int) $items->sum('quantity'),
             'coupon_code'      => $cart->coupon->codigo ?? $cart->coupon_code ?? null,
-            'discount'         => $discount,
+            'discount'         => $discountCents / 100,
             'discount_cents'   => $discountCents,
-            'shipping'         => $shipping,
+            'shipping'         => $hasShipping ? $shippingCents / 100 : null,
             'shipping_cents'   => $shippingCents,
             'shipping_service' => $cart->shipping_service,
-            'shipping_cep'     => $cart->shipping_cep, // Retorna o CEP salvo para o React
+            'shipping_cep'     => $cart->shipping_cep,
             'subtotal'         => $subtotal,
             'subtotal_cents'   => $subtotalCents,
-            'total'            => $total,
+            'total'            => $totalCents / 100,
             'total_cents'      => $totalCents,
             'items'            => $items->values()->toArray(),
         ];

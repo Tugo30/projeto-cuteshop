@@ -1,7 +1,13 @@
 import { createRoot } from 'react-dom/client'
-import PixPayment from '@/pages/Checkout/PixPayment'
+import PaymentPage from '@/pages/Checkout/PaymentPage'
+import Navbar from '@/pages/Home/Navbar'
 
 const el = document.getElementById('checkout-pix-app')
 if (el) {
-    createRoot(el).render(<PixPayment orderCode={el.dataset.orderCode} />)
-}   
+    createRoot(el).render(
+        <>
+            <Navbar />
+            <PaymentPage orderCode={el.dataset.orderCode} />
+        </>
+    )
+}

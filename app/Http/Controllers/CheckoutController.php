@@ -2,13 +2,16 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\StoreCheckoutRequest;
 use App\Models\Order;
 use App\Services\CheckoutService;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Renderer\ImageRenderer;
 use BaconQrCode\Renderer\RendererStyle\RendererStyle;
 use BaconQrCode\Writer;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
+use RuntimeException;
 
 class CheckoutController extends Controller
 {
@@ -16,77 +19,98 @@ class CheckoutController extends Controller
 
     public function page()
     {
-        $cartService = app(\App\Services\CartService::class);
-        $cart = $cartService->load();
+        $cart = app(\App\Services\CartService::class)->load();
 
-        return view('checkout.checkout', [
-            'cart' => $cart
-        ]);
+        return view('checkout.checkout', ['cart' => $cart]);
     }
 
-    public function store(Request $request)
+    public function store(StoreCheckoutRequest $request)
     {
-        $data = $request->validate([
-            'customer_name'     => 'required|string|min:3|max:255',
-            'customer_email'    => 'required|email|max:255',
-            'customer_phone'    => 'nullable|string|max:20',
-            'customer_document' => 'nullable|string|max:20',
-            'ship_zipcode'      => 'required|string|max:9',
-            'ship_street'       => 'required|string|max:255',
-            'ship_number'       => 'required|string|max:20',
-            'ship_complement'   => 'nullable|string|max:100',
-            'ship_district'     => 'required|string|max:100',
-            'ship_city'         => 'required|string|max:100',
-            'ship_state'        => 'required|string|size:2',
-        ]);
+        $data = $request->validated();
+        $cart = app(\App\Services\CartService::class)->load();
 
-        // 1. Instancia o CartService via container
-        $cartService = app(\App\Services\CartService::class);
-        $cart = $cartService->load();
-
-        // 2. Se o frete ainda não foi calculado ou se o CEP digitado no checkout for diferente do carrinho, calcula agora
-        if ($cart->shipping_cents === null || $cart->shipping_cep !== $data['ship_zipcode']) {
-            $superFrete = app(\App\Services\SuperFreteService::class);
-
-            try {
-                $result = $superFrete->cheapestForCart($cart, $data['ship_zipcode']);
-
-                $cart->update([
-                    'shipping_cep'     => $data['ship_zipcode'],
-                    'shipping_cents'   => $result['cents'],
-                    'shipping_service' => $result['service'],
-                ]);
-            } catch (\Exception $e) {
-                return response()->json([
-                    'message' => 'Erro ao calcular frete para este CEP: ' . $e->getMessage(),
-                    'errors'  => ['ship_zipcode' => ['CEP inválido ou sem cobertura de frete.']]
-                ], 422);
-            }
+        if ($cart->items->isEmpty()) {
+            return response()->json([
+                'message' => 'Carrinho vazio.',
+                'errors'  => ['cart' => ['Carrinho vazio.']],
+            ], 422);
         }
 
-        // 3. Cria o pedido normalmente com o frete garantido
-        $order = $this->checkout->createOrder($data);
+        $hasShipping = $cart->shipping_cents !== null && filled($cart->shipping_service);
+        $cartCep = preg_replace('/\D/', '', (string) $cart->shipping_cep);
 
-        return response()->json([
-            'order_code'  => $order->code,
-            'redirect_to' => route('checkout.pix', $order->code),
-        ], 201);
+        if (! $hasShipping) {
+            return response()->json([
+                'message' => 'Selecione o frete na sacola antes de pagar.',
+                'errors'  => ['cart' => ['Frete não selecionado.']],
+            ], 422);
+        }
+
+        if ($cartCep !== $data['ship_zipcode']) {
+            return response()->json([
+                'message' => 'O CEP da entrega é diferente do frete calculado. Volte à sacola e calcule novamente.',
+                'errors'  => ['ship_zipcode' => ['CEP diferente do frete selecionado.']],
+            ], 422);
+        }
+
+        return DB::transaction(function () use ($request, $data) {
+            $pending = Order::query()
+                ->where('user_id', $request->user()->id)
+                ->where('status', 'pending')
+                ->where(function ($q) {
+                    $q->whereNull('expires_at')->orWhere('expires_at', '>', now());
+                })
+                ->latest()
+                ->lockForUpdate()
+                ->first();
+
+            if ($pending) {
+                return response()->json([
+                    'message'     => 'Você já tem um pedido aguardando pagamento.',
+                    'order_code'  => $pending->code,
+                    'redirect_to' => route('checkout.pay', $pending->code),
+                ], 409);
+            }
+
+            try {
+                $order = $this->checkout->createOrder($data);
+            } catch (RuntimeException $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+
+            return response()->json([
+                'order_code'  => $order->code,
+                'redirect_to' => route('checkout.pay', $order->code),
+            ], 201);
+        });
+    }
+
+    private function ownedOrder(string $code): Order
+    {
+        $order = Order::where('code', $code)->firstOrFail();
+
+        if ((int) $order->user_id !== (int) auth()->id()) {
+            abort(404);
+        }
+
+        return $order;
     }
 
     public function pixPage(string $code)
     {
-        $order = Order::where('code', $code)->firstOrFail();
+        $order = $this->ownedOrder($code);
 
         return view('checkout.checkout-pix', ['orderCode' => $order->code]);
     }
 
-    public function pixData(string $code)
+    public function paymentData(string $code)
     {
-        $order = Order::with(['items', 'payment'])->where('code', $code)->firstOrFail();
+        $order = $this->ownedOrder($code);
+        $order->load(['items', 'payment']);
 
         if ($order->isExpired()) {
             $this->checkout->cancelExpired();
-            $order->refresh();
+            $order->refresh()->load(['items', 'payment']);
         }
 
         $payment = $order->payment;
@@ -94,23 +118,45 @@ class CheckoutController extends Controller
         return response()->json([
             'code'        => $order->code,
             'status'      => $order->status,
+            'method'      => $payment?->method ?? 'getnet',
             'total'       => $order->total_cents / 100,
             'expires_at'  => $order->expires_at,
-            'pix_payload' => $payment?->pix_payload,
-            'qr_svg'      => $payment?->pix_payload ? $this->qrSvg($payment->pix_payload) : null,
             'items'       => $order->items->map(fn($i) => [
                 'name'     => $i->product_name,
                 'size'     => $i->variant_size,
                 'quantity' => $i->quantity,
                 'total'    => $i->total_cents / 100,
             ]),
+            'pix_payload' => $payment?->pix_payload,
+            'qr_svg'      => $payment?->pix_payload ? $this->qrSvg($payment->pix_payload) : null,
+            'ticket_url'  => $payment?->ticketUrl(),
+            'barcode'     => $payment?->barcode(),
         ]);
     }
 
-    /** Polling do front: "já caiu?" */
+    public function payCard(Request $request, string $code)
+    {
+        $order = $this->ownedOrder($code);
+
+        $tokenized = $request->validate([
+            'number_token'     => 'required|string',
+            'cardholder_name'  => 'required|string',
+            'expiration_month' => 'required|string',
+            'expiration_year'  => 'required|string',
+        ]);
+
+        try {
+            $order = $this->checkout->chargeCardPayment($order, $tokenized);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['status' => $order->status, 'paid' => $order->status === 'paid']);
+    }
+
     public function status(string $code)
     {
-        $order = Order::where('code', $code)->firstOrFail();
+        $order = $this->ownedOrder($code);
 
         return response()->json([
             'status' => $order->status,
