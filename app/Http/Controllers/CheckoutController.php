@@ -5,17 +5,22 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreCheckoutRequest;
 use App\Models\Order;
 use App\Services\CheckoutService;
+use App\Services\GetnetService;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Renderer\ImageRenderer;
 use BaconQrCode\Renderer\RendererStyle\RendererStyle;
 use BaconQrCode\Writer;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
 use RuntimeException;
 
 class CheckoutController extends Controller
 {
-    public function __construct(private CheckoutService $checkout) {}
+    public function __construct(
+        private CheckoutService $checkout,
+        private GetnetService $getnet,
+    ) {}
 
     public function page()
     {
@@ -114,35 +119,51 @@ class CheckoutController extends Controller
         }
 
         $payment = $order->payment;
+        $method = $payment?->method ?? $order->payment_method ?? 'pix';
 
-        return response()->json([
-            'code'        => $order->code,
-            'status'      => $order->status,
-            'method'      => $payment?->method ?? 'getnet',
-            'total'       => $order->total_cents / 100,
-            'expires_at'  => $order->expires_at,
-            'items'       => $order->items->map(fn($i) => [
-                'name'     => $i->product_name,
-                'size'     => $i->variant_size,
-                'quantity' => $i->quantity,
-                'total'    => $i->total_cents / 100,
-            ]),
-            'pix_payload' => $payment?->pix_payload,
-            'qr_svg'      => $payment?->pix_payload ? $this->qrSvg($payment->pix_payload) : null,
-            'ticket_url'  => $payment?->ticketUrl(),
-            'barcode'     => $payment?->barcode(),
+        return response()->json($this->presentPayment($order, $payment, $method));
+    }
+
+    public function tokenizeCard(Request $request, string $code)
+    {
+        $order = $this->ownedOrder($code);
+        $payment = $order->payment;
+
+        if (! $payment || $payment->method !== 'credit_card') {
+            return response()->json(['message' => 'Este pedido nao aceita cartao.'], 422);
+        }
+
+        if ($order->status === 'paid') {
+            return response()->json(['message' => 'Pedido ja pago.'], 422);
+        }
+
+        $data = $request->validate([
+            'card_number' => 'required|string',
         ]);
+
+        try {
+            $token = $this->getnet->tokenizeCard($data['card_number'], $order);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['number_token' => $token]);
     }
 
     public function payCard(Request $request, string $code)
     {
         $order = $this->ownedOrder($code);
 
+        if ($request->has('card_number') || $request->has('number') || $request->has('cvv')) {
+            return response()->json(['message' => 'Dados sensiveis do cartao nao sao aceitos neste endpoint.'], 422);
+        }
+
         $tokenized = $request->validate([
             'number_token'     => 'required|string',
-            'cardholder_name'  => 'required|string',
-            'expiration_month' => 'required|string',
-            'expiration_year'  => 'required|string',
+            'cardholder_name'  => 'required|string|max:50',
+            'expiration_month' => 'required|string|regex:/^\d{2}$/',
+            'expiration_year'  => 'required|string|regex:/^\d{2,4}$/',
+            'security_code'    => 'required|string|regex:/^\d{3,4}$/',
         ]);
 
         try {
@@ -151,23 +172,76 @@ class CheckoutController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        return response()->json(['status' => $order->status, 'paid' => $order->status === 'paid']);
+        $payment = $order->payment;
+
+        return response()->json([
+            'status'         => $order->status,
+            'paid'           => $order->status === 'paid',
+            'payment_label'  => $this->checkout->paymentLabel($order->status, $payment?->provider_status),
+        ]);
     }
 
     public function status(string $code)
     {
         $order = $this->ownedOrder($code);
+        $payment = $order->payment;
+
+        if ($order->status === 'pending' && $payment?->provider_id) {
+            $lockKey = 'getnet.sync.'.$order->code;
+
+            if (Cache::add($lockKey, 1, 8)) {
+                try {
+                    $order = $this->checkout->syncFromGetnet($payment);
+                    $payment = $order->payment;
+                } catch (\Throwable) {
+                    $order->refresh();
+                    $payment = $order->payment;
+                }
+            }
+        }
+
+        if ($order->isExpired() && $order->status === 'pending') {
+            $this->checkout->cancelExpired();
+            $order->refresh();
+            $payment = $order->payment;
+        }
 
         return response()->json([
-            'status' => $order->status,
-            'paid'   => $order->status === 'paid',
+            'status'        => $order->status,
+            'paid'          => $order->status === 'paid',
+            'method'        => $payment?->method ?? $order->payment_method,
+            'payment_label' => $this->checkout->paymentLabel($order->status, $payment?->provider_status),
         ]);
+    }
+
+    private function presentPayment(Order $order, $payment, string $method): array
+    {
+        return [
+            'code'           => $order->code,
+            'status'         => $order->status,
+            'method'         => $method,
+            'payment_label'  => $this->checkout->paymentLabel($order->status, $payment?->provider_status),
+            'total'          => $order->total_cents / 100,
+            'expires_at'     => $order->expires_at,
+            'items'          => $order->items->map(fn ($i) => [
+                'name'     => $i->product_name,
+                'size'     => $i->variant_size,
+                'quantity' => $i->quantity,
+                'total'    => $i->total_cents / 100,
+            ]),
+            'pix_payload'    => $method === 'pix' ? $payment?->pix_payload : null,
+            'qr_svg'         => ($method === 'pix' && $payment?->pix_payload)
+                ? $this->qrSvg($payment->pix_payload)
+                : null,
+            'ticket_url'     => $method === 'boleto' ? $payment?->ticketUrl() : null,
+            'barcode'        => $method === 'boleto' ? $payment?->barcode() : null,
+        ];
     }
 
     private function qrSvg(string $payload): string
     {
         $writer = new Writer(new ImageRenderer(new RendererStyle(300), new SvgImageBackEnd()));
 
-        return 'data:image/svg+xml;base64,' . base64_encode($writer->writeString($payload));
+        return 'data:image/svg+xml;base64,'.base64_encode($writer->writeString($payload));
     }
 }

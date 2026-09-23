@@ -9,16 +9,21 @@ export default function BoletoMethod({ data, secondsLeft }) {
 
     async function copy() {
         if (!data.barcode) return
-        await navigator.clipboard.wireText(data.barcode)
+        await navigator.clipboard.writeText(data.barcode)
         setCopied(true)
-        toast.success("Código de barras copiado.")
+        toast.success("Codigo de barras copiado.")
         setTimeout(() => setCopied(false), 2500)
     }
 
     return (
-        <div className="mt-10 flex flex-col items-center">
-            <p className="fomt-display italic text-[36px] text-ink m-0">{brl(data.total)}</p>
+        <div className="mt-10 flex flex-col items-center w-full">
+            <p className="font-display italic text-[36px] text-ink m-0">{brl(data.total)}</p>
             {secondsLeft !== null && (
+                <p className="mt-2 font-mono text-[11px] uppercase tracking-widest text-amber-800">
+                    Expira em {formatLeft(secondsLeft)}
+                </p>
+            )}
+            {data.barcode && (
                 <p className="m-0 mt-10 text-[13px] font-mono text-ink break-all text-center leading-relaxed">
                     {data.barcode}
                 </p>
@@ -26,9 +31,9 @@ export default function BoletoMethod({ data, secondsLeft }) {
             <button
                 type="button"
                 onClick={copy}
-                className="w-full mt-4 py-4 border border-ink font-mono text-[11px] uppercase tracking-[0.16em] bg-white"
+                className="w-full mt-4 py-4 border border-ink text-ink font-mono text-[11px] uppercase tracking-[0.16em] bg-white"
             >
-                {copied ? "Copiado" : "Copiar código de barras"}
+                {copied ? "Copiado" : "Copiar codigo de barras"}
             </button>
             {data.ticket_url && (
                 <a
@@ -41,7 +46,7 @@ export default function BoletoMethod({ data, secondsLeft }) {
                 </a>
             )}
             <p className="mt-8 text-[12px] text-[#8A877F] text-center leading-relaxed">
-                A confirmação do pagamento pode levar até 2 dias úteis após o pagamento.
+                A confirmacao do pagamento pode levar ate 2 dias uteis apos o pagamento.
             </p>
         </div>
     )

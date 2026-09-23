@@ -128,6 +128,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/checkout/pagamento/{code}', [CheckoutController::class, 'pixPage'])->middleware('throttle:30,1')->name('checkout.pay');
     Route::get('/api/checkout/{code}/pagamento', [CheckoutController::class, 'paymentData'])->middleware('throttle:30,1')->where('code', 'CS-[A-Za-z0-9-]+')->name('checkout.payment.data');
     Route::get('/api/checkout/{code}/status', [CheckoutController::class, 'status'])->middleware('throttle:60,1')->where('code', 'CS-[A-Za-z0-9-]+')->name('checkout.status');
+    Route::post('/api/checkout/{code}/cartao/token', [CheckoutController::class, 'tokenizeCard'])->middleware('throttle:10,1')->name('checkout.pay.card.token');
     Route::post('/api/checkout/{code}/cartao', [CheckoutController::class, 'payCard'])->middleware('throttle:10,1')->name('checkout.pay.card');
 
     /* ---------- SUPORTE ---------- */
