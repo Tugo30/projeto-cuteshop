@@ -80,6 +80,11 @@ export default function Sidebar() {
                                 }}>
                                     Gestão
                                 </div>
+                                <a href="/admin/pedidos" style={getItemStyle(currentPath.startsWith("/admin/pedidos"))}>
+                                    <i className="fas fa-receipt" style={{ width: "20px", textAlign: "center" }}></i>
+                                    <span>Pedidos</span>
+                                </a>
+
                                 <a href="/admin/produtos" style={getItemStyle(currentPath.startsWith("/admin/produtos"))}>
                                     <i className="fas fa-box-open" style={{ width: "20px", textAlign: "center" }}></i>
                                     <span>Produtos</span>
@@ -91,10 +96,6 @@ export default function Sidebar() {
                                 <a href="/admin/cupons" style={getItemStyle(currentPath.startsWith("/admin/cupons"))}>
                                     <i className="fas fa-ticket-alt" style={{ width: "20px", textAlign: "center" }}></i>
                                     <span>Cupons</span>
-                                </a>
-                                <a href="/admin/pedidos" style={getItemStyle(currentPath.startsWith("/admin/pedidos"))}>
-                                    <i className="fas fa-receipt" style={{ width: "20px", textAlign: "center" }}></i>
-                                    <span>Pedidos</span>
                                 </a>
 
                             </>
