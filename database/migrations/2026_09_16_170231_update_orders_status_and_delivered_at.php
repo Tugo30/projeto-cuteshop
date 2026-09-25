@@ -9,10 +9,13 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('orders', function (Blueprint $table) {
-            // ENUM -> VARCHAR(30): status novo não exige ALTER TABLE.
-            // Valores existentes são preservados.
-            $table->string('status', 30)->default('pending')->change();
-            $table->timestamp('delivered_at')->nullable();
+            if (Schema::getConnection()->getDriverName() !== 'sqlite') {
+                $table->string('status', 30)->default('pending')->change();
+            }
+
+            if (! Schema::hasColumn('orders', 'delivered_at')) {
+                $table->timestamp('delivered_at')->nullable();
+            }
         });
     }
 

@@ -12,6 +12,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (Schema::getConnection()->getDriverName() === 'sqlite') {
+            return;
+        }
+
         Schema::table('orders', function (Blueprint $table) {
             DB::statement("ALTER TABLE orders MODIFY status ENUM('pending','paid','preparing','shipped','delivered','canceled','expired','refunded') NOT NULL DEFAULT 'pending'");
         });
@@ -22,8 +26,12 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (Schema::getConnection()->getDriverName() === 'sqlite') {
+            return;
+        }
+
         Schema::table('orders', function (Blueprint $table) {
-                DB::statement("ALTER TABLE orders MODIFY status ENUM('pending','paid','shipped','delivered','canceled','expired','refunded') NOT NULL DEFAULT 'pending'");
+            DB::statement("ALTER TABLE orders MODIFY status ENUM('pending','paid','shipped','delivered','canceled','expired','refunded') NOT NULL DEFAULT 'pending'");
         });
     }
 };

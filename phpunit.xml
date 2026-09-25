@@ -29,5 +29,11 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
+        <env name="GETNET_CLIENT_ID" value="test-client"/>
+        <env name="GETNET_CLIENT_SECRET" value="test-secret-client"/>
+        <env name="GETNET_SELLER_ID" value="test-seller"/>
+        <env name="GETNET_SANDBOX" value="true"/>
+        <env name="GETNET_WEBHOOK_SECRET" value="test-webhook-secret"/>
+        <env name="GETNET_FAKE" value="false"/>
     </php>
 </phpunit>

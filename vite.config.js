@@ -27,6 +27,7 @@ export default defineConfig({
                 'resources/js/admin-products.jsx',
                 'resources/js/checkout.jsx',
                 'resources/js/checkout-pix.jsx',
+                'resources/js/checkout-payment.jsx',
                 'resources/js/cart-page.jsx',
                 'resources/js/my-orders.jsx',
                 'resources/js/profile.jsx',

@@ -271,7 +271,6 @@ class ProductController extends Controller
     {
         $this->authorize('create', Product::class);
         $data = $request->validate($this->rules(), $this->messages());
-        abort_unless(\App\Models\Product::where('id', $productId)->where('active', true)->exists(), 404);
 
         $product = DB::transaction(function () use ($data, $request) {
             $product = Product::create([

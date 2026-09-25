@@ -12,6 +12,13 @@ use RuntimeException;
 
 class GetnetService
 {
+    public const STATUS_PAID = 'paid';
+    public const STATUS_PENDING = 'pending';
+    public const STATUS_DENIED = 'denied';
+    public const STATUS_EXPIRED = 'expired';
+    public const STATUS_CANCELED = 'canceled';
+    public const STATUS_UNKNOWN = 'unknown';
+
     public function baseUrl(): string
     {
         return config('services.getnet.sandbox')
@@ -70,13 +77,50 @@ class GetnetService
         });
     }
 
-    private function http(): PendingRequest
+    private function http(bool $retry = true): PendingRequest
     {
-        return Http::timeout(20)
-            ->retry(2, 250)
+        $request = Http::timeout(20)
             ->withToken($this->accessToken())
             ->acceptJson()
             ->asJson();
+
+        if ($retry) {
+            $request = $request->retry(2, 250);
+        }
+
+        return $request;
+    }
+
+    public function tokenizeCard(string $cardNumber, Order $order): string
+    {
+        $cardNumber = preg_replace('/\D/', '', $cardNumber) ?? '';
+
+        if (strlen($cardNumber) < 13 || strlen($cardNumber) > 19) {
+            throw new RuntimeException('Numero do cartao invalido.');
+        }
+
+        if ($this->isFake()) {
+            return 'tok_'.substr(hash('sha256', $order->code), 0, 24);
+        }
+
+        $response = $this->http()
+            ->withHeaders(['seller_id' => $this->sellerId()])
+            ->post($this->baseUrl().'/v1/tokens/card', [
+                'card_number' => $cardNumber,
+                'customer_id' => 'user-'.$order->user_id,
+            ]);
+
+        $token = (string) ($response->json('number_token') ?? '');
+
+        if ($response->failed() || $token === '') {
+            Log::error('Getnet tokenizacao falhou', [
+                'status' => $response->status(),
+                'order'  => $order->code,
+            ]);
+            throw new RuntimeException('Nao foi possivel tokenizar o cartao.');
+        }
+
+        return $token;
     }
 
     public function createPixPayment(Order $order): array
@@ -84,18 +128,22 @@ class GetnetService
         if ($this->isFake()) {
             return [
                 'provider_id'   => 'local-pix-'.$order->code,
-                'status'        => 'pending',
+                'status'        => 'WAITING',
                 'pix_payload'   => '00020126580014BR.GOV.BCB.PIX0136123e4567-e89b-12d3-a456-42661417400052040000530398654041.005802BR5913TestStore6008SAO PAULO62070503***6304E2CA',
                 'pix_qr_base64' => null,
-                'checkout_url'  => null,
                 'ticket_url'    => null,
                 'barcode'       => null,
-                'raw'           => ['fake' => true, 'method' => 'pix'],
+                'raw'           => ['fake' => true, 'method' => 'pix', 'status' => 'WAITING'],
             ];
         }
 
-        $response = $this->http()
-            ->withHeaders(['seller_id' => $this->sellerId()])
+        $expiresSeconds = max(60, (int) config('pix.expires_minutes', 30) * 60);
+
+        $response = $this->http(false)
+            ->withHeaders([
+                'seller_id'                => $this->sellerId(),
+                'x-qrcode-expiration-time' => (string) $expiresSeconds,
+            ])
             ->post($this->baseUrl().'/v1/payments/qrcode/pix', [
                 'amount'      => (int) $order->total_cents,
                 'currency'    => 'BRL',
@@ -108,18 +156,24 @@ class GetnetService
             throw new RuntimeException('Nao foi possivel iniciar o Pix. Tente de novo em instantes.');
         }
 
-        $data = $response->json();
+        $data = $response->json() ?? [];
         $extra = $data['additional_data'] ?? [];
+        $qr = $extra['qr_code'] ?? $extra['pix_code'] ?? null;
+        $qrBase64 = $extra['qr_code_base64'] ?? null;
+
+        if (is_string($qr) && ! str_starts_with($qr, '000201') && $qrBase64 === null && strlen($qr) > 100) {
+            $qrBase64 = $qr;
+            $qr = $extra['pix_code'] ?? $extra['emv'] ?? null;
+        }
 
         return [
             'provider_id'   => (string) ($data['payment_id'] ?? ''),
-            'status'        => 'pending',
-            'pix_payload'   => $extra['qr_code'] ?? $extra['pix_code'] ?? null,
-            'pix_qr_base64' => $extra['qr_code_base64'] ?? null,
-            'checkout_url'  => null,
+            'status'        => (string) ($data['status'] ?? 'WAITING'),
+            'pix_payload'   => is_string($qr) ? $qr : null,
+            'pix_qr_base64' => is_string($qrBase64) ? $qrBase64 : null,
             'ticket_url'    => null,
             'barcode'       => null,
-            'raw'           => $data,
+            'raw'           => $this->sanitize($data),
         ];
     }
 
@@ -130,13 +184,12 @@ class GetnetService
 
             return [
                 'provider_id'   => 'local-boleto-'.$order->code,
-                'status'        => 'pending',
+                'status'        => 'PENDING',
                 'pix_payload'   => null,
                 'pix_qr_base64' => null,
-                'checkout_url'  => null,
                 'ticket_url'    => null,
                 'barcode'       => $barcode,
-                'raw'           => ['fake' => true, 'method' => 'boleto', 'barcode' => $barcode],
+                'raw'           => ['fake' => true, 'method' => 'boleto', 'barcode' => $barcode, 'status' => 'PENDING'],
             ];
         }
 
@@ -170,27 +223,26 @@ class GetnetService
             ],
         ];
 
-        $response = $this->http()->post($this->baseUrl().'/v1/payments/boleto', $payload);
+        $response = $this->http(false)->post($this->baseUrl().'/v1/payments/boleto', $payload);
 
         if ($response->failed()) {
             Log::error('Getnet boleto falhou', ['status' => $response->status(), 'order' => $order->code]);
             throw new RuntimeException('Nao foi possivel gerar o boleto. Tente de novo em instantes.');
         }
 
-        $data = $response->json();
+        $data = $response->json() ?? [];
 
         return [
             'provider_id'   => (string) ($data['payment_id'] ?? ''),
-            'status'        => 'pending',
+            'status'        => (string) ($data['status'] ?? 'PENDING'),
             'pix_payload'   => null,
             'pix_qr_base64' => null,
-            'checkout_url'  => null,
             'ticket_url'    => data_get($data, 'boleto._links.pdf.href')
                 ?? data_get($data, 'boleto.pdf')
                 ?? null,
             'barcode'       => data_get($data, 'boleto.barcode')
                 ?? data_get($data, 'boleto.typeful_line'),
-            'raw'           => $data,
+            'raw'           => $this->sanitize($data),
         ];
     }
 
@@ -199,14 +251,25 @@ class GetnetService
         if ($this->isFake()) {
             return [
                 'provider_id' => 'local-card-'.$order->code,
-                'status'      => 'approved',
+                'status'      => 'APPROVED',
                 'amount'      => (int) $order->total_cents,
-                'raw'         => ['fake' => true, 'method' => 'credit_card'],
+                'raw'         => ['fake' => true, 'method' => 'credit_card', 'status' => 'APPROVED'],
             ];
         }
 
         $document = preg_replace('/\D/', '', (string) $order->customer_document);
         $names = $this->splitName($order->customer_name);
+
+        $card = [
+            'number_token'     => $tokenized['number_token'],
+            'cardholder_name'  => $tokenized['cardholder_name'],
+            'expiration_month' => $tokenized['expiration_month'],
+            'expiration_year'  => $tokenized['expiration_year'],
+        ];
+
+        if (! empty($tokenized['security_code'])) {
+            $card['security_code'] = $tokenized['security_code'];
+        }
 
         $payload = [
             'seller_id' => $this->sellerId(),
@@ -233,16 +296,11 @@ class GetnetService
                 'save_card_data'      => false,
                 'transaction_type'    => 'FULL',
                 'number_installments' => 1,
-                'card'                => [
-                    'number_token'     => $tokenized['number_token'],
-                    'cardholder_name'  => $tokenized['cardholder_name'],
-                    'expiration_month' => $tokenized['expiration_month'],
-                    'expiration_year'  => $tokenized['expiration_year'],
-                ],
+                'card'                => $card,
             ],
         ];
 
-        $response = $this->http()
+        $response = $this->http(false)
             ->withHeaders(['Idempotency-Key' => 'card-'.$order->code])
             ->post($this->baseUrl().'/v1/payments/credit', $payload);
 
@@ -251,40 +309,36 @@ class GetnetService
             throw new RuntimeException('Nao foi possivel processar o cartao.');
         }
 
-        $data = $response->json();
+        $data = $response->json() ?? [];
 
         return [
             'provider_id' => (string) ($data['payment_id'] ?? ''),
-            'status'      => strtolower((string) ($data['status'] ?? '')),
-            'amount'      => (int) ($data['amount'] ?? 0),
-            'raw'         => $data,
+            'status'      => (string) ($data['status'] ?? ''),
+            'amount'      => (int) ($data['amount'] ?? $order->total_cents),
+            'raw'         => $this->sanitize($data),
         ];
     }
 
     public function fetchPayment(string $paymentId, string $kind = 'auto'): array
     {
         if ($this->isFake()) {
-            if (str_starts_with($paymentId, 'local-')) {
-                return [
-                    'payment_id' => $paymentId,
-                    'id'         => $paymentId,
-                    'status'     => 'APPROVED',
-                    'amount'     => null,
-                    'order_id'   => null,
-                ];
-            }
-
-            return ['payment_id' => $paymentId, 'id' => $paymentId, 'status' => 'WAITING'];
+            return [
+                'payment_id' => $paymentId,
+                'id'         => $paymentId,
+                'status'     => 'WAITING',
+                'amount'     => null,
+                'order_id'   => null,
+            ];
         }
 
         $paths = match ($kind) {
-            'pix'    => [
+            'pix'         => [
                 '/v1/payments/qrcode/pix/'.$paymentId,
                 '/v1/payments/qrcode/'.$paymentId,
             ],
-            'boleto' => ['/v1/payments/boleto/'.$paymentId],
-            'credit' => ['/v1/payments/credit/'.$paymentId],
-            default  => [
+            'boleto'      => ['/v1/payments/boleto/'.$paymentId],
+            'credit_card', 'credit' => ['/v1/payments/credit/'.$paymentId],
+            default       => [
                 '/v1/payments/qrcode/pix/'.$paymentId,
                 '/v1/payments/qrcode/'.$paymentId,
                 '/v1/payments/boleto/'.$paymentId,
@@ -298,21 +352,76 @@ class GetnetService
                 ->get($this->baseUrl().$path);
 
             if ($response->successful()) {
-                $data = $response->json();
+                $data = $response->json() ?? [];
                 $data['id'] = $data['payment_id'] ?? $data['id'] ?? $paymentId;
 
-                return $data;
+                return $this->sanitize($data);
             }
         }
 
         throw new RuntimeException('Falha ao consultar pagamento na Getnet.');
     }
 
+    public function mapStatus(string $status): string
+    {
+        $status = strtoupper(trim($status));
+
+        return match ($status) {
+            'APPROVED', 'PAID', 'CONFIRMED', 'AUTHORIZED', 'CAPTURED' => self::STATUS_PAID,
+            'DENIED', 'REFUSED', 'ERROR', 'FAILED', 'NOT_AUTHORIZED', 'NOT AUTHORIZED' => self::STATUS_DENIED,
+            'EXPIRED', 'EXPIRED_TRANSACTION' => self::STATUS_EXPIRED,
+            'CANCELED', 'CANCELLED', 'CANCELED_REVERSED', 'VOIDED' => self::STATUS_CANCELED,
+            'PENDING', 'WAITING', 'WAITING_PAYMENT', 'GENERATED', 'NEW', 'IN_PROCESS', 'PROCESSING' => self::STATUS_PENDING,
+            default => self::STATUS_UNKNOWN,
+        };
+    }
+
     public function isApproved(array $data): bool
     {
-        $status = strtoupper((string) ($data['status'] ?? ''));
+        return $this->mapStatus((string) ($data['status'] ?? '')) === self::STATUS_PAID;
+    }
 
-        return in_array($status, ['APPROVED', 'PAID', 'CONFIRMED', 'AUTHORIZED'], true);
+    public function extractAmount(array $data): ?int
+    {
+        $amount = $data['amount']
+            ?? data_get($data, 'payment.amount')
+            ?? data_get($data, 'order.amount');
+
+        if ($amount === null || $amount === '') {
+            return null;
+        }
+
+        return (int) $amount;
+    }
+
+    public function extractOrderCode(array $data): ?string
+    {
+        $code = $data['order_id'] ?? data_get($data, 'order.order_id');
+
+        return is_string($code) && $code !== '' ? $code : null;
+    }
+
+    public function sanitize(array $data): array
+    {
+        $sensitive = [
+            'card_number', 'number', 'security_code', 'cvv', 'cvc',
+            'password', 'card', 'pan', 'track1', 'track2',
+        ];
+
+        foreach ($data as $key => $value) {
+            $k = strtolower((string) $key);
+
+            if (in_array($k, $sensitive, true)) {
+                unset($data[$key]);
+                continue;
+            }
+
+            if (is_array($value)) {
+                $data[$key] = $this->sanitize($value);
+            }
+        }
+
+        return $data;
     }
 
     private function address(Order $order): array
